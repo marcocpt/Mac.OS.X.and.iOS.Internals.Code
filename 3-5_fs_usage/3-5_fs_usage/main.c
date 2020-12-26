@@ -7,6 +7,8 @@
 #include <string.h> // memset
 //#include <sys/_types.h>     // for uint32_t and friends, on which fsevents.h relies
 
+#include <sys/stat.h> // for mkdir
+#include <libgen.h> // for basename
 #include <sys/sysctl.h> // for sysctl, KERN_PROC, etc.
 #include <errno.h>
 
@@ -30,22 +32,20 @@
  * author and the book website (http://NewOSXBook.com/) would be appreciated.
  *
  * New in 2.0:
+ 
  *   - Supports filters: Process IDs, names or events
  *   - Supports auto-stop and auto-link
  *   - Color
- **
- * > http://newosxbook.com/src.jl?tree=listings&file=3-filemon.c
+ *
+ * 2.0.1 - Fixed linking and filter self out
+ *       - Can link from elsewhere in the path
+ *
+ *> https://github.com/heartbleeded/MOXiI_Filemon/blob/master/filemon.c
  */
 
-int g_dumpArgs =0;
+// copied from bsd/vfs/vfs_events.c
 
-#define BUFSIZE 256 *1024
-
-#define COLOR_OP YELLOW
-#define COLOR_PROC BLUE
-#define COLOR_PATH CYAN
-
-#pragma pack(1)
+#pragma pack(1)  // to be on the safe side. Not really necessary.. struct fields are aligned.
 typedef struct kfs_event_a {
   uint16_t type;
   uint16_t refcount;
@@ -57,6 +57,14 @@ typedef struct kfs_event_arg {
   char data[0];
 } kfs_event_arg;
 #pragma pack()
+
+int g_dumpArgs =0;
+
+#define BUFSIZE 1024 *1024
+
+#define COLOR_OP YELLOW
+#define COLOR_PROC BLUE
+#define COLOR_PATH CYAN
 
 // Utility functions
 static char *
@@ -203,6 +211,7 @@ usage()
   fprintf(stderr,"\t" LINK_OPTION "|" LINK_LONG_OPTION         ":                auto-create a hard link to file (prevents deletion by program :-)\n");
   fprintf(stderr,"\t" COLOR_OPTION "|" COLOR_LONG_OPTION " (or set JCOLOR=1 first)\n");
 
+  fprintf(stderr,"\tThis is J's filemon, compiled on " __DATE__ "\n");
 
 
 }
@@ -214,6 +223,9 @@ usage()
 int
 interesting_process (int pid, char *Filters[], int NumFilters)
 {
+  // filter myself out
+  if (pid == getpid()) return 0;
+  // Otherwise, if no user defined filters, get all
   if (!NumFilters) return 1;
   return 0;
 }
@@ -242,12 +254,18 @@ interesting_file (char *FileName, char *Filters[], int NumFilters)
 int
 main (int argc, char **argv)
 {
+
+#ifdef ARM
+  // It's smarter to do with statfs()
+  char *filemonDir = "/private/var/tmp/filemon";
+  mkdir (filemonDir, 0777);
+#endif
   int fsed, cloned_fsed;
   int i;
   int rc;
   fsevent_clone_args  clone_args;
         unsigned short *arg_type;
-  char buf[BUFSIZE];
+  char *buf = malloc(BUFSIZE);
   int autostop = 0;
   int autolink = 0;
   char *fileFilters[MAX_FILTERS]= { 0 };
@@ -443,12 +461,30 @@ main (int argc, char **argv)
             printf ("%s%s%s\t",
         color ? COLOR_PATH : "" , fse_arg->data, color ? NORMAL :"");
          
-        if (fse->type == FSE_CREATE_FILE && autolink && (fse->pid != getpid()))
+      // Fix: Don't autolink own files
+        if (fse->type == FSE_CREATE_FILE && autolink && (fse->pid != getpid()) &&
+        !strstr(fse_arg->data, "filemon"))
+
       {
          int fileLen = strlen(fse_arg->data);
          char *linkName = malloc (fileLen + 20);
+#ifndef ARM
          strcpy(linkName, fse_arg->data);
-         snprintf(linkName + fileLen, fileLen + 20, ".filemon.%d", autolink);
+#else
+      
+         if (strncmp(fse_arg->data, "/private/var",12) == 0)
+        {
+         // Might be in some subdir which will go away
+         strcpy(linkName, filemonDir);
+         strcat(linkName,"/");
+         strcat (linkName, basename(fse_arg->data));
+
+        }
+#endif
+         
+         // Don't need to worry about buffer boundaries here..
+         
+         snprintf(linkName + strlen(linkName), fileLen + 20, ".filemon.%d", autolink);
          int rc = link (fse_arg->data, linkName);
          if (rc) { fprintf(stderr,"%sWarning: Unable to autolink %s%s - file must have been deleted already\n",
           color ? RED : "",
