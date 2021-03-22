@@ -5,7 +5,7 @@
 //  Created by marcow on 2020/12/24.
 //  Copyright © 2020 marcow. All rights reserved.
 //
-//  [LISTING 3-1: Using kqueues and kevents to fi  lter process events](marginnote3app://note/0C34BC48-8B3E-4098-8C38-38EA0B2C4C17)
+//  [LISTING 3-1: Using kqueues and kevents to filter process events](marginnote3app://note/0C34BC48-8B3E-4098-8C38-38EA0B2C4C17)
 
 #include <stdio.h>
 #include <stdlib.h>
